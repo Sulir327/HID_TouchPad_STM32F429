@@ -37,28 +37,19 @@
 #include "usb_device.h"
 #include "usbd_hid.h"
 
-#define DELAY							1000
-#define TS_MVMT_DELAY			1
+#define DELAY_1SEC				1000
 #define TS_SCALE_COEFF		1
-#define CURSOR_X_DEP			5
-#define CURSOR_Y_DEP			5
+#define REFRESH_RATE			10
 
 typedef enum {true , false} bool;
 
 extern USBD_HandleTypeDef hUsbDeviceHS;
-
 DMA2D_HandleTypeDef hdma2d;
-
 I2C_HandleTypeDef hi2c3;
-
 LTDC_HandleTypeDef hltdc;
-
 SPI_HandleTypeDef hspi5;
-
 UART_HandleTypeDef huart5;
-
 SDRAM_HandleTypeDef hsdram1;
-
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -70,11 +61,14 @@ static void MX_SPI5_Init(void);
 static void MX_UART5_Init(void);
 
 /*  USER DEFINED FUNCTIONS    */
-void myMagicalProg(void);
-void afficherTXT(uint16_t line_number, uint8_t* l1, uint8_t* l2, uint8_t* val);
+void Show_Text(uint16_t line_number, uint8_t* l1, uint8_t* l2, uint8_t* val);
 void init_LCD(void);
 void Show_Error(void);
-uint8_t getDiff(uint16_t x_ , uint16_t x);
+
+
+uint8_t report[4] = {0};
+uint16_t ts_x, ts_y, ts_x_, ts_y_;
+uint8_t diff_x, diff_y;
 
 
 int main(void)
@@ -104,8 +98,7 @@ int main(void)
 	/*   My variables          */
 	uint8_t	status;
 	TS_StateTypeDef		TS_State;
-	uint8_t text[30];
-
+	//uint8_t text[30];
 
 	status = BSP_TS_Init(BSP_LCD_GetXSize(), BSP_LCD_GetYSize());
 
@@ -129,85 +122,76 @@ int main(void)
 		BSP_LCD_DisplayStringAt(0, LINE(6), (uint8_t *)"INIT OK :)", CENTER_MODE);
 	}
 
-	HAL_Delay(DELAY);
+	HAL_Delay(DELAY_1SEC);
 	BSP_LCD_Clear(LCD_COLOR_BLUE);
 	BSP_LCD_SetBackColor(LCD_COLOR_BLUE);
 	BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
 
-	/*  Preparing the report  */
-	uint8_t report[4] = {0};
-	uint16_t ts_x, ts_y, ts_x_, ts_y_;
-
-	bool first = true;
-
+	/*  Preparing the HID report 
 	report[0] = 0x00;
-	//report[1] = -CURSOR_X_DEP;
-	//report[2] = (- CURSOR_Y_DEP);
+	report[1] = 0x10;
+	report[2] = 0x00;
 	report[3] = 0x00;
+	
+	int i = 0;
+	for(i=0; i<10; i++){
+		USBD_HID_SendReport(&hUsbDeviceHS, report, (uint16_t)4);
+		HAL_Delay(500);
+	}
+	
+	while(1){
+	
+	}
+	*/
 	
   while (1)
   {
-		BSP_TS_GetState(&TS_State);  
-		
-		first = true;
+		BSP_TS_GetState(&TS_State);  		
+
 		while (TS_State.TouchDetected)
-		{	
-			BSP_LCD_Clear(LCD_COLOR_BLUE);
+		{
+			ts_x = TS_State.X;
+			ts_y = TS_State.Y;
+
+			BSP_LCD_Clear(LCD_COLOR_DARKGREEN);
+			HAL_Delay(REFRESH_RATE);
+			
+			BSP_TS_GetState(&TS_State);  		
 
 			ts_x_ = TS_State.X;
 			ts_y_ = TS_State.Y;
 			
-			if (first)
-			{
-				ts_x = ts_x_;
-				ts_y = ts_y_;
-				first = false;
-				continue;
-			}
+			// Debugging
+			//diff_x = (ts_x_-ts_x);
+			//diff_y = (ts_y_-ts_y);
 			
+			report[1] = ((uint8_t)(TS_SCALE_COEFF*(ts_x_-ts_x))) ;
+	    report[2] = ((uint8_t)(TS_SCALE_COEFF*(ts_y_-ts_y )));
+			if(report[2] != 0 || report[1] != 0)
+				USBD_HID_SendReport(&hUsbDeviceHS, report, (uint16_t)4);
+			
+			//USBD_HID_SendReport(&hUsbDeviceHS, report, (uint16_t)4);
+			//sprintf((char*)text, "dx=%d  --  dy=%d", diff_x, diff_y);
+			//BSP_LCD_DisplayStringAt(0, LINE(3), (uint8_t *)&text, CENTER_MODE);
+			
+			BSP_TS_GetState(&TS_State);  		
+		}
+		
+		BSP_LCD_Clear(LCD_COLOR_BLUE);
+  }
+
+/*
+		
 			sprintf((char*)text, "x=%d -- y\'=%d", ts_x, ts_y);
 			BSP_LCD_DisplayStringAt(0, LINE(3), (uint8_t *)&text, CENTER_MODE);
 			
 			sprintf((char*)text, "x'=%d -- y\'=%d", ts_x_, ts_y_);
 			BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)&text, CENTER_MODE);
 
-			report[1] = getDiff(ts_x_, ts_x);
-			report[2] = getDiff(ts_y_, ts_y);
-			
-			if(report[0] != 0 || report[1] != 0)
-				USBD_HID_SendReport(&hUsbDeviceHS, report, (uint8_t)4);
-			
 			sprintf((char*)text, "dx=%d -- dy=%d", report[1], report[2]);
 			BSP_LCD_DisplayStringAt(0, LINE(8), (uint8_t *)&text, CENTER_MODE);
-						
-			HAL_Delay(1);
-			
-			ts_x = ts_x_;
-			ts_y = ts_y_;
-			
-			BSP_TS_GetState(&TS_State);
-		}
-		
-		HAL_Delay(1);
+*/
 
-  }
-
-}
-
-
-
-uint8_t getDiff(uint16_t ts_x_ , uint16_t ts_x)
-{
-	// There is a problem in this function .. guess what is it *_*
-	// Bacause we do operations on uint16_t and then we got to send them as uint8_t *_*
-	uint16_t x_ = ts_x_;
-	uint16_t x  = ts_x;
-	
-	if(x_ > x)
-		return (uint8_t)((TS_SCALE_COEFF *(x_ - x)) >> 1);
-	else
-		return (uint8_t)(-((TS_SCALE_COEFF * (x - x_)) >> 1));
-	
 }
 
 void init_LCD(void)
@@ -221,7 +205,7 @@ void init_LCD(void)
 	BSP_LCD_DisplayOn();
 }
 
-void afficherTXT(uint16_t line_number, uint8_t* l1, uint8_t* l2, uint8_t* val)
+void Show_Text(uint16_t line_number, uint8_t* l1, uint8_t* l2, uint8_t* val)
 {
 	BSP_LCD_SetTextColor(LCD_COLOR_ORANGE);
 	BSP_LCD_SetFont(&Font16);
@@ -231,10 +215,8 @@ void afficherTXT(uint16_t line_number, uint8_t* l1, uint8_t* l2, uint8_t* val)
 
 void Show_Error()
 {
-	BSP_LCD_Clear(LCD_COLOR_LIGHTRED);
-	
+	BSP_LCD_Clear(LCD_COLOR_LIGHTRED);	
 	BSP_LCD_DisplayStringAt(0, 120, (uint8_t*)"FAIL at TS", CENTER_MODE);
-
 }
 
 
